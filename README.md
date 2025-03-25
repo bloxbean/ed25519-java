@@ -66,6 +66,12 @@ For ease of following, here are the main methods in ref10 and their equivalents 
 Important changes
 -----------------
 
+### 0.3.1
+- forked from upstream
+- CVE-2020-36843 fix (https://github.com/str4d/ed25519-java/issues/82#issuecomment-2751279758)
+- Minimum Java 7
+- Flexible support X.509 implementation types
+
 ### 0.3.0
 
 - The library has been extensively profiled for contention issues in a multi-threaded environment.  The only
