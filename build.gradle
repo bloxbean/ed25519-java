@@ -82,12 +82,22 @@ publishing {
             pom {
                 name = 'EdDSA-Java_BloxBean_patch'
 
-                description = 'This is a patched version of ed25519-java, an implementation of EdDSA in Java. The orginal implementation can be found here https://github.com/str4d/ed25519-java'
+                description = 'This is a patched version of ed25519-java, an implementation of EdDSA in Java. The original implementation can be found here https://github.com/str4d/ed25519-java'
                 url = 'https://github.com/bloxbean/ed25519-java'
                 licenses {
                     license {
                         name = 'CC0 1.0 Universal'
                         url = 'https://creativecommons.org/publicdomain/zero/1.0/'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'satran004'
+                        name = 'Satya'
+                        description = '''Maintainer of this patched version.
+                         This project is based on the original ed25519-java implementation.
+                         For the original project and developers, refer to: https://github.com/str4d/ed25519-java.
+                         This version includes fixes and improvements for specific use cases.'''
                     }
                 }
                 scm {
