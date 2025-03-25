@@ -1,13 +1,13 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>net.i2p.crypto</groupId>
+  <groupId>com.bloxbean.cardano</groupId>
   <artifactId>eddsa</artifactId>
-  <version>0.3.0</version>
+  <version>0.3.1</version>
   <name>EdDSA-Java</name>
   <packaging>bundle</packaging>
   <description>Implementation of EdDSA in Java</description>
-  <url>https://github.com/str4d/ed25519-java</url>
+  <url>https://github.com/bloxbean/ed25519-java</url>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
@@ -99,7 +99,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
-        <version>3.0.0</version>
+        <version>3.11.2</version>
         <configuration>
           <charset>UTF-8</charset>
           <docencoding>UTF-8</docencoding>
@@ -151,6 +151,22 @@
           <autoReleaseAfterClose>true</autoReleaseAfterClose>
         </configuration>
       </plugin>
+      <plugin>
+            <groupId>org.owasp</groupId>
+            <artifactId>dependency-check-maven</artifactId>
+            <version>12.1.0</version>
+            <configuration>
+                <skipTestScope>false</skipTestScope>
+                <failBuildOnCVSS>0</failBuildOnCVSS>
+            </configuration>
+            <executions>
+                <execution>
+                    <goals>
+                        <goal>check</goal>
+                    </goals>
+                </execution>
+            </executions>
+      </plugin>
     </plugins>
   </build>
   <dependencies>
@@ -163,7 +179,7 @@
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <version>4.12</version>
+      <version>4.13.2</version>
       <type>maven-plugin</type>
       <scope>test</scope>
     </dependency>
