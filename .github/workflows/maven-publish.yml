@@ -15,6 +15,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Import GPG Key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | gpg --batch --import      
+
       - name: Set up Maven Central Repository
         uses: actions/setup-java@v4
         with:
