@@ -21,7 +21,6 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import net.i2p.crypto.eddsa.math.Curve;
@@ -30,7 +29,6 @@ import net.i2p.crypto.eddsa.math.FieldElement;
 import net.i2p.crypto.eddsa.math.GroupElement;
 import net.i2p.crypto.eddsa.math.bigint.BigIntegerLittleEndianEncoding;
 import net.i2p.crypto.eddsa.math.ed25519.Ed25519FieldElement;
-import net.i2p.crypto.eddsa.math.ed25519.Ed25519VerifyEquation;
 import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable;
 import net.i2p.crypto.eddsa.spec.EdDSAParameterSpec;
 import net.i2p.crypto.eddsa.spec.EdDSAPrivateKeySpec;
@@ -114,26 +112,12 @@ public class InPlaceVerifyTest {
         FieldElement[] ts = {curve.getField().ZERO, curve.getField().ONE, a.getX(), a.getY().add(a.getX())};
         for (FieldElement t : ts) {
             GroupElement inconsistent = GroupElement.p3(curve, a.getX(), a.getY(), a.getZ(), t);
-            assertFalse(Ed25519VerifyEquation.supports(inconsistent));
             assertTrue(verify(new EdDSAPublicKeySpec(inconsistent, SPEC), msg, sig));
             byte[] other = sig.clone();
             other[0] ^= 1;
             assertFalse(verify(new EdDSAPublicKeySpec(inconsistent, SPEC), msg, other));
         }
-        assertTrue(Ed25519VerifyEquation.supports(a));
         assertTrue(verify(new EdDSAPublicKeySpec(a, SPEC), msg, sig));
-    }
-
-    /** A point off the curve, or with Z = 0, keeps the 0.3.1 computation. */
-    @Test
-    public void pointsOffTheCurveKeepTheComputationOfRelease031() throws Exception {
-        Curve curve = SPEC.getCurve();
-        FieldElement x = curve.getField().ONE.add(curve.getField().ONE);
-        FieldElement y = x.add(curve.getField().ONE);
-        assertFalse(Ed25519VerifyEquation.supports(GroupElement.p3(curve, x, y, curve.getField().ONE, x.multiply(y))));
-        GroupElement a = (GroupElement) signed(new byte[0])[1];
-        assertFalse(Ed25519VerifyEquation.supports(
-                GroupElement.p3(curve, a.getX(), a.getY(), curve.getField().ZERO, a.getT())));
     }
 
     /**
@@ -174,7 +158,6 @@ public class InPlaceVerifyTest {
         limbs[0] = Integer.MIN_VALUE;
         FieldElement z = new Ed25519FieldElement(f, limbs);
         GroupElement a = GroupElement.p3(curve, f.ZERO, z, z, f.ZERO);
-        assertFalse(Ed25519VerifyEquation.supports(a));
         assertTrue(verify(new EdDSAPublicKeySpec(a, SPEC), new byte[0], identitySignature()));
     }
 
@@ -187,10 +170,8 @@ public class InPlaceVerifyTest {
                 Utils.hexToBytes("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"),
                 new BigIntegerLittleEndianEncoding());
         GroupElement a = GroupElement.p3(curve, f.ZERO, f.ONE, f.ONE, new Ed25519FieldElement(foreign, new int[10]));
-        assertFalse(Ed25519VerifyEquation.supports(a));
         assertTrue(verify(new EdDSAPublicKeySpec(a, SPEC), new byte[0], identitySignature()));
         GroupElement standard = GroupElement.p3(curve, f.ZERO, f.ONE, f.ONE, f.ZERO);
-        assertTrue(Ed25519VerifyEquation.supports(standard));
         assertTrue(verify(new EdDSAPublicKeySpec(standard, SPEC), new byte[0], identitySignature()));
     }
 
@@ -213,31 +194,41 @@ public class InPlaceVerifyTest {
         assertFalse(engine.verify(sig));
     }
 
-    /** holds checks what the engine checks before it: lengths and S < L. */
+    /**
+     * 0.3.1 verifies with the negated key it computed and cached on first use; a caller who changes the limbs of
+     * their own key point afterwards does not change that cached value.
+     */
     @Test
-    public void holdsRefusesWhatTheEngineRefusesFirst() throws Exception {
-        byte[] msg = new byte[0];
-        Object[] s = signed(msg);
-        byte[] sig = (byte[]) s[0];
-        GroupElement a = (GroupElement) s[1];
-        MessageDigest sha512 = MessageDigest.getInstance("SHA-512");
-        sha512.update(sig, 0, 32);
-        sha512.update(a.toByteArray());
-        byte[] k = SPEC.getScalarOps().reduce(sha512.digest());
-        assertTrue(Ed25519VerifyEquation.holds(a, k, sig));
+    public void aKeyPointChangedAfterItsNegationWasCachedVerifiesAsRelease031() throws Exception {
+        Curve curve = SPEC.getCurve();
+        Field f = curve.getField();
+        int[] y = new int[10];
+        y[0] = -1;
+        GroupElement a = GroupElement.p3(curve, f.ZERO, new Ed25519FieldElement(f, y), f.ONE, f.ZERO);
+        EdDSAPublicKey key = new EdDSAPublicKey(new EdDSAPublicKeySpec(a, SPEC));
+        key.getNegativeA();
+        y[0] = 1;
+        EdDSAEngine engine = new EdDSAEngine(MessageDigest.getInstance(SPEC.getHashAlgorithm()));
+        engine.initVerify(key);
+        engine.update(new byte[] {0});
+        assertFalse(engine.verify(identitySignature()));
+    }
 
-        byte[] plusL = sig.clone();
-        byte[] order = Utils.hexToBytes("edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010");
-        int carry = 0;
-        for (int i = 0; i < 32; i++) {
-            int sum = (plusL[32 + i] & 0xff) + (order[i] & 0xff) + carry;
-            plusL[32 + i] = (byte) sum;
-            carry = sum >> 8;
-        }
-        assertEquals(0, carry);
-        assertFalse(Ed25519VerifyEquation.holds(a, k, plusL));
-        assertFalse(Ed25519VerifyEquation.holds(a, k, Arrays.copyOf(sig, 63)));
-        assertFalse(Ed25519VerifyEquation.holds(a, Arrays.copyOf(k, 31), sig));
+    /** A coordinate of a subclass of Ed25519FieldElement keeps the 0.3.1 computation, which never calls isNonZero. */
+    @Test
+    public void aKeyPointWithASubclassedFieldElementVerifiesAsRelease031() throws Exception {
+        Curve curve = SPEC.getCurve();
+        Field f = curve.getField();
+        int[] one = new int[10];
+        one[0] = 1;
+        FieldElement z = new Ed25519FieldElement(f, one) {
+            @Override
+            public boolean isNonZero() {
+                throw new IllegalStateException("not called by 0.3.1");
+            }
+        };
+        GroupElement a = GroupElement.p3(curve, f.ZERO, f.ONE, z, f.ZERO);
+        assertTrue(verify(new EdDSAPublicKeySpec(a, SPEC), new byte[0], identitySignature()));
     }
 
     private static String outcome(byte[] pk, byte[] msg, byte[] sig) {

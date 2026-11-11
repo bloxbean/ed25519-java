@@ -12,6 +12,8 @@
 package net.i2p.crypto.eddsa.math;
 
 import net.i2p.crypto.eddsa.Utils;
+import net.i2p.crypto.eddsa.math.ed25519.Ed25519FieldElement;
+import net.i2p.crypto.eddsa.math.ed25519.Ed25519VerifyEquation;
 
 import java.io.Serializable;
 import java.util.Arrays;
@@ -1046,6 +1048,21 @@ public class GroupElement implements Serializable {
             if (aslide[i] != 0 || bslide[i] != 0) break;
         }
 
+        if (i >= 0 && A != null) {
+            // The same loop on limbs updated in place, when every element it reads is a plain Ed25519 field element of
+            // a well-formed table: the same arithmetic in the same order, so the same limbs. Anything else stays here.
+            FieldElement[][] aTable = plainTable(A.dblPrecmp);
+            FieldElement[][] bTable = aTable == null ? null : plainTable(this.dblPrecmp);
+            if (bTable != null && r.repr == Representation.P2 && Ed25519VerifyEquation.isPlain(r.X)
+                    && Ed25519VerifyEquation.isPlain(r.Y) && Ed25519VerifyEquation.isPlain(r.Z)
+                    && r.Y.f == r.X.f && r.Z.f == r.X.f) {
+                int[][] xyz = Ed25519VerifyEquation.doubleScalarMultiply(aslide, aTable, bslide, bTable,
+                        new FieldElement[] {r.X, r.Y, r.Z});
+                return p2(this.curve, new Ed25519FieldElement(r.X.f, xyz[0]), new Ed25519FieldElement(r.X.f, xyz[1]),
+                        new Ed25519FieldElement(r.X.f, xyz[2]));
+            }
+        }
+
         for (; i >= 0; --i) {
             GroupElement t = r.dbl();
 
@@ -1065,6 +1082,24 @@ public class GroupElement implements Serializable {
         }
 
         return r;
+    }
+
+    /**
+     * The {@code X, Y, Z} of each entry of a {@link #precomputeDouble} table, when all 8 are PRECOMP points of plain
+     * Ed25519 field elements; otherwise null.
+     */
+    private static FieldElement[][] plainTable(GroupElement[] table) {
+        if (table == null || table.length != 8)
+            return null;
+        FieldElement[][] out = new FieldElement[8][];
+        for (int j = 0; j < 8; j++) {
+            GroupElement q = table[j];
+            if (q == null || q.repr != Representation.PRECOMP || !Ed25519VerifyEquation.isPlain(q.X)
+                    || !Ed25519VerifyEquation.isPlain(q.Y) || !Ed25519VerifyEquation.isPlain(q.Z))
+                return null;
+            out[j] = new FieldElement[] {q.X, q.Y, q.Z};
+        }
+        return out;
     }
 
     /**

@@ -11,389 +11,150 @@
  */
 package net.i2p.crypto.eddsa.math.ed25519;
 
-import net.i2p.crypto.eddsa.Utils;
-import net.i2p.crypto.eddsa.math.Field;
 import net.i2p.crypto.eddsa.math.FieldElement;
-import net.i2p.crypto.eddsa.math.GroupElement;
-import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable;
 
 /**
- * {@link GroupElement#doubleScalarMultiplyVariableTime} for Ed25519 verification, on mutable {@code int[10]} field
- * elements: {@code R' = k(-A) + SB} with the same sliding windows, tables and formulas (ref10's
- * {@code ge_double_scalarmult_vartime}), then the encoding of {@code R'} compared with the bytes of {@code R}, as
- * {@link net.i2p.crypto.eddsa.EdDSAEngine} does. It gives the same answers without a new object per field operation.
+ * The loop of {@code GroupElement.doubleScalarMultiplyVariableTime} on {@code int[10]} limbs updated in place: the
+ * same steps, formulas and operand order as that method's {@code dbl}, {@code toP3}, {@code madd}, {@code msub} and
+ * {@code toP2}, over the same precomputed tables, with the same field arithmetic ({@code Ed25519FieldElement}'s
+ * kernels). It computes the same limbs without a new object per field operation.
  * <p>
- * Internal to {@code EdDSAEngine}, public only because the engine is in another package: not a stable API. The engine
- * uses it only for {@code EdDSANamedCurveTable.ED_25519_CURVE_SPEC} and a key point that {@link #supports} accepts.
+ * Internal to {@code GroupElement}, public only because that class is in another package: not a stable API.
  */
 public final class Ed25519VerifyEquation {
-
-    private static final Field FIELD = EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getCurve().getField();
-    private static final Ed25519LittleEndianEncoding ENCODING = new Ed25519LittleEndianEncoding();
-    private static final int[] D2 = ((Ed25519FieldElement) EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getCurve().get2D()).t;
-
-    /** {@code B, 3B, ..., 15B} as {@code (y + x, y - x, 2dxy)}: libsodium's {@code Bi}. */
-    private static final int[][] BI_YPX = new int[8][];
-    private static final int[][] BI_YMX = new int[8][];
-    private static final int[][] BI_XY2D = new int[8][];
-
-    static {
-        GroupElement b = EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getB();
-        Point p = new Point();
-        Point twice = new Point();
-        Point q = new Point();
-        Cached c = new Cached();
-        int[] t0 = new int[10];
-        copy(t(b.getX()), p.x);
-        copy(t(b.getY()), p.y);
-        copy(t(b.getZ()), p.z);
-        copy(t(b.getT()), p.t);
-        p3Dbl(twice, p, t0);
-        p1p1ToP3(q, twice);
-        copy(q.x, twice.x); copy(q.y, twice.y); copy(q.z, twice.z); copy(q.t, twice.t);
-        int[] recip = new int[10];
-        int[] x = new int[10];
-        int[] y = new int[10];
-        for (int i = 0; i < 8; i++) {
-            if (i > 0) {
-                toCached(c, p);
-                add(q, twice, c, t0);
-                p1p1ToP3(p, q);
-            }
-            Ed25519FieldElement.invert(p.z, recip);
-            Ed25519FieldElement.mul(p.x, recip, x);
-            Ed25519FieldElement.mul(p.y, recip, y);
-            BI_YPX[i] = new int[10];
-            BI_YMX[i] = new int[10];
-            BI_XY2D[i] = new int[10];
-            add(y, x, BI_YPX[i]);
-            sub(y, x, BI_YMX[i]);
-            Ed25519FieldElement.mul(x, y, BI_XY2D[i]);
-            Ed25519FieldElement.mul(BI_XY2D[i], D2, BI_XY2D[i]);
-        }
-    }
 
     private Ed25519VerifyEquation() {
     }
 
-    /** The group order {@code L}, little-endian. */
-    private static final byte[] ORDER = Utils.hexToBytes(
-            "edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010");
-
-    /** Limb bounds of a field element the field arithmetic takes as input: {@code 1.1 * 2^25} and {@code 1.1 * 2^24}. */
-    private static final int EVEN_LIMB_BOUND = (int) (1.1 * (1 << 25));
-    private static final int ODD_LIMB_BOUND = (int) (1.1 * (1 << 24));
-
     /**
-     * Whether {@link #holds} gives the outcome of {@code GroupElement.doubleScalarMultiplyVariableTime} for {@code a}:
-     * a P3 point of the standard curve instance whose coordinates are {@link Ed25519FieldElement}s of the standard
-     * field instance, with limbs within {@code 1.1 * 2^25} (even) and {@code 1.1 * 2^24} (odd), {@code Z != 0},
-     * {@code T Z = X Y} and {@code (Y^2 - X^2) Z^2 = Z^4 + d X^2 Y^2}. Keys decoded from bytes and points computed by
-     * this library always are. A point built through {@code GroupElement.p3} may not be, and
-     * {@code GroupElement.negate} and the table of {@code A, 3A, ..., 15A} treat such a point differently from this
-     * class. Each condition is checked before any arithmetic, so this method neither throws nor overflows.
+     * Whether {@code e} is exactly an {@link Ed25519FieldElement} (not a subclass), whose limbs the loop may read.
      *
-     * @param a a point
-     * @return whether {@link #holds} may be used for it
+     * @param e a field element
+     * @return whether the loop may use it
      */
-    public static boolean supports(GroupElement a) {
-        if (a.getRepresentation() != GroupElement.Representation.P3
-                || a.getCurve() != EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getCurve())
-            return false;
-        FieldElement x = a.getX(), y = a.getY(), z = a.getZ(), t = a.getT();
-        if (!(standard(x) && standard(y) && standard(z) && standard(t)))
-            return false;
-        if (!z.isNonZero())
-            return false;
-        if (!t.multiply(z).equals(x.multiply(y)))
-            return false;
-        FieldElement xx = x.square(), yy = y.square(), zz = z.square();
-        FieldElement d = EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getCurve().getD();
-        return yy.subtract(xx).multiply(zz).equals(zz.square().add(d.multiply(xx).multiply(yy)));
-    }
-
-    /** An {@link Ed25519FieldElement} of the standard field instance with limbs within the input bounds. */
-    private static boolean standard(FieldElement e) {
-        if (!(e instanceof Ed25519FieldElement) || ((Ed25519FieldElement) e).field() != FIELD)
-            return false;
-        int[] limbs = ((Ed25519FieldElement) e).t;
-        if (limbs == null || limbs.length != 10)
-            return false;
-        for (int i = 0; i < 10; i++) {
-            int bound = (i & 1) == 0 ? EVEN_LIMB_BOUND : ODD_LIMB_BOUND;
-            if (limbs[i] > bound || limbs[i] < -bound)
-                return false;
-        }
-        return true;
+    public static boolean isPlain(FieldElement e) {
+        return e != null && e.getClass() == Ed25519FieldElement.class;
     }
 
     /**
-     * @param a the public key point {@code A}, one that {@link #supports} accepts
-     * @param k {@code SHA-512(R || A || M) mod L}, 32 bytes little-endian
-     * @param sig the signature {@code R || S}
-     * @return whether the first 32 bytes of {@code sig} encode {@code SB - kA}; false when {@code k} is not 32 bytes,
-     *         {@code sig} not 64 bytes, or {@code S >= L}
+     * {@code r = a A + b B} as {@code GroupElement.doubleScalarMultiplyVariableTime} computes it. All elements are
+     * plain {@link Ed25519FieldElement}s ({@link #isPlain}).
+     *
+     * @param aSlide  {@code GroupElement.slide(a)}
+     * @param aTable  {@code A.dblPrecmp} as {@code [i][0..2]} = its {@code X, Y, Z} (PRECOMP: y+x, y-x, 2dxy)
+     * @param bSlide  {@code GroupElement.slide(b)}
+     * @param bTable  {@code B.dblPrecmp}, the same way
+     * @param zero    the {@code X, Y, Z} of {@code curve.getZero(P2)}, the start of the loop
+     * @return the limbs of the P2 result: {@code {X, Y, Z}}
      */
-    public static boolean holds(GroupElement a, byte[] k, byte[] sig) {
-        if (k.length != 32 || sig.length != 64 || !scalarBelowOrder(sig))
-            return false;
-        byte[] s = new byte[32];
-        System.arraycopy(sig, 32, s, 0, 32);
-        byte[] aSlide = slide(k);
-        byte[] bSlide = slide(s);
+    public static int[][] doubleScalarMultiply(byte[] aSlide, FieldElement[][] aTable, byte[] bSlide,
+            FieldElement[][] bTable, FieldElement[] zero) {
+        // r: P2 (X, Y, Z); t: P1P1 (X, Y, Z, T); u: P3 (X, Y, Z, T).
+        int[] rX = copy(zero[0]), rY = copy(zero[1]), rZ = copy(zero[2]);
+        int[] tX = new int[10], tY = new int[10], tZ = new int[10], tT = new int[10];
+        int[] uX = new int[10], uY = new int[10], uZ = new int[10], uT = new int[10];
+        int[] w0 = new int[10], w1 = new int[10], w2 = new int[10], w3 = new int[10], w4 = new int[10];
 
-        int[] t0 = new int[10];
-        // -A
-        Point negA = new Point();
-        neg(t(a.getX()), negA.x);
-        copy(t(a.getY()), negA.y);
-        copy(t(a.getZ()), negA.z);
-        neg(t(a.getT()), negA.t);
-
-        // Ai = -A, -3A, ..., -15A (cached)
-        Cached[] ai = new Cached[8];
-        Point p1p1 = new Point();
-        Point u = new Point();
-        Point a2 = new Point();
-        ai[0] = new Cached();
-        toCached(ai[0], negA);
-        p3Dbl(p1p1, negA, t0);
-        p1p1ToP3(a2, p1p1);
-        for (int i = 1; i < 8; i++) {
-            add(p1p1, a2, ai[i - 1], t0);
-            p1p1ToP3(u, p1p1);
-            ai[i] = new Cached();
-            toCached(ai[i], u);
+        int i;
+        for (i = 255; i >= 0; --i) {
+            if (aSlide[i] != 0 || bSlide[i] != 0) break;
         }
 
-        // r = 0 (P2)
-        Point r = new Point();
-        r.y[0] = 1;
-        r.z[0] = 1;
-        int i = 255;
-        while (i >= 0 && aSlide[i] == 0 && bSlide[i] == 0) {
-            i--;
-        }
-        for (; i >= 0; i--) {
-            p2Dbl(p1p1, r, t0);
-            int da = aSlide[i];
-            if (da > 0) {
-                p1p1ToP3(u, p1p1);
-                add(p1p1, u, ai[da / 2], t0);
-            } else if (da < 0) {
-                p1p1ToP3(u, p1p1);
-                sub(p1p1, u, ai[(-da) / 2], t0);
+        for (; i >= 0; --i) {
+            dbl(rX, rY, rZ, tX, tY, tZ, tT, w0, w1, w2, w3, w4);
+
+            if (aSlide[i] > 0) {
+                toP3(tX, tY, tZ, tT, uX, uY, uZ, uT);
+                madd(false, uX, uY, uZ, uT, aTable[aSlide[i] / 2], tX, tY, tZ, tT, w0, w1, w2, w3, w4);
+            } else if (aSlide[i] < 0) {
+                toP3(tX, tY, tZ, tT, uX, uY, uZ, uT);
+                madd(true, uX, uY, uZ, uT, aTable[(-aSlide[i]) / 2], tX, tY, tZ, tT, w0, w1, w2, w3, w4);
             }
-            int db = bSlide[i];
-            if (db > 0) {
-                p1p1ToP3(u, p1p1);
-                madd(p1p1, u, BI_YPX[db / 2], BI_YMX[db / 2], BI_XY2D[db / 2], t0);
-            } else if (db < 0) {
-                p1p1ToP3(u, p1p1);
-                msub(p1p1, u, BI_YPX[(-db) / 2], BI_YMX[(-db) / 2], BI_XY2D[(-db) / 2], t0);
+
+            if (bSlide[i] > 0) {
+                toP3(tX, tY, tZ, tT, uX, uY, uZ, uT);
+                madd(false, uX, uY, uZ, uT, bTable[bSlide[i] / 2], tX, tY, tZ, tT, w0, w1, w2, w3, w4);
+            } else if (bSlide[i] < 0) {
+                toP3(tX, tY, tZ, tT, uX, uY, uZ, uT);
+                madd(true, uX, uY, uZ, uT, bTable[(-bSlide[i]) / 2], tX, tY, tZ, tT, w0, w1, w2, w3, w4);
             }
-            p1p1ToP2(r, p1p1);
+
+            // toP2: X = X.multiply(T), Y = Y.multiply(Z), Z = Z.multiply(T)
+            Ed25519FieldElement.mul(tX, tT, rX);
+            Ed25519FieldElement.mul(tY, tZ, rY);
+            Ed25519FieldElement.mul(tZ, tT, rZ);
         }
+        return new int[][] {rX, rY, rZ};
+    }
 
-        // ge25519_tobytes
-        int[] recip = new int[10];
-        int[] x = new int[10];
-        int[] y = new int[10];
-        Ed25519FieldElement.invert(r.z, recip);
-        Ed25519FieldElement.mul(r.x, recip, x);
-        Ed25519FieldElement.mul(r.y, recip, y);
-        byte[] encoded = ENCODING.encode(new Ed25519FieldElement(FIELD, y));
-        encoded[31] |= (byte) ((ENCODING.encode(new Ed25519FieldElement(FIELD, x))[0] & 1) << 7);
-        for (int j = 0; j < 32; j++) {
-            if (encoded[j] != sig[j]) {
-                return false;
-            }
+    /**
+     * {@code GroupElement.dbl} of a P2 point into P1P1: {@code XX = X^2; YY = Y^2; B = Z.squareAndDouble();
+     * A = X + Y; AA = A^2; Yn = YY + XX; Zn = YY - XX; (AA - Yn, Yn, Zn, B - Zn)}.
+     */
+    private static void dbl(int[] x, int[] y, int[] z, int[] oX, int[] oY, int[] oZ, int[] oT,
+            int[] xx, int[] yy, int[] b, int[] a, int[] aa) {
+        Ed25519FieldElement.sqr(x, xx);
+        Ed25519FieldElement.sqr(y, yy);
+        Ed25519FieldElement.sqr2(z, b);
+        add(x, y, a);
+        Ed25519FieldElement.sqr(a, aa);
+        add(yy, xx, oY);
+        sub(yy, xx, oZ);
+        sub(aa, oY, oX);
+        sub(b, oZ, oT);
+    }
+
+    /** {@code toP3} of a P1P1 point: {@code (X.multiply(T), Y.multiply(Z), Z.multiply(T), X.multiply(Y))}. */
+    private static void toP3(int[] x, int[] y, int[] z, int[] t, int[] oX, int[] oY, int[] oZ, int[] oT) {
+        Ed25519FieldElement.mul(x, t, oX);
+        Ed25519FieldElement.mul(y, z, oY);
+        Ed25519FieldElement.mul(z, t, oZ);
+        Ed25519FieldElement.mul(x, y, oT);
+    }
+
+    /**
+     * {@code madd} ({@code negate} false) or {@code msub} ({@code negate} true) of a P3 point and a PRECOMP point
+     * {@code q = (y+x, y-x, 2dxy)} into P1P1:
+     * {@code YpX = Y + X; YmX = Y - X; A = YpX.multiply(q.X or q.Y); B = YmX.multiply(q.Y or q.X);
+     * C = q.Z.multiply(T); D = Z + Z; (A - B, A + B, D + C or D - C, D - C or D + C)}.
+     */
+    private static void madd(boolean negate, int[] x, int[] y, int[] z, int[] t, FieldElement[] q,
+            int[] oX, int[] oY, int[] oZ, int[] oT, int[] ypx, int[] ymx, int[] a, int[] b, int[] c) {
+        int[] qX = ((Ed25519FieldElement) q[0]).t;
+        int[] qY = ((Ed25519FieldElement) q[1]).t;
+        int[] qZ = ((Ed25519FieldElement) q[2]).t;
+        add(y, x, ypx);
+        sub(y, x, ymx);
+        Ed25519FieldElement.mul(ypx, negate ? qY : qX, a);
+        Ed25519FieldElement.mul(ymx, negate ? qX : qY, b);
+        Ed25519FieldElement.mul(qZ, t, c);
+        add(z, z, ypx); // D
+        sub(a, b, oX);
+        add(a, b, oY);
+        if (negate) {
+            sub(ypx, c, oZ);
+            add(ypx, c, oT);
+        } else {
+            add(ypx, c, oZ);
+            sub(ypx, c, oT);
         }
-        return true;
     }
 
-    /** {@code S < L} for the last 32 bytes of {@code sig}. */
-    private static boolean scalarBelowOrder(byte[] sig) {
-        for (int i = 31; i >= 0; i--) {
-            int s = sig[32 + i] & 0xff;
-            int l = ORDER[i] & 0xff;
-            if (s != l)
-                return s < l;
-        }
-        return false;
+    private static int[] copy(FieldElement e) {
+        return ((Ed25519FieldElement) e).t.clone();
     }
 
-    /** libsodium {@code slide_vartime}; the same as {@code GroupElement.slide}. */
-    static byte[] slide(byte[] a) {
-        byte[] r = new byte[256];
-        for (int i = 0; i < 256; ++i) {
-            r[i] = (byte) (1 & (a[i >> 3] >> (i & 7)));
-        }
-        for (int i = 0; i < 256; ++i) {
-            if (r[i] != 0) {
-                for (int b = 1; b <= 6 && i + b < 256; ++b) {
-                    if (r[i + b] != 0) {
-                        if (r[i] + (r[i + b] << b) <= 15) {
-                            r[i] += r[i + b] << b;
-                            r[i + b] = 0;
-                        } else if (r[i] - (r[i + b] << b) >= -15) {
-                            r[i] -= r[i + b] << b;
-                            for (int k = i + b; k < 256; ++k) {
-                                if (r[k] == 0) {
-                                    r[k] = 1;
-                                    break;
-                                }
-                                r[k] = 0;
-                            }
-                        } else
-                            break;
-                    }
-                }
-            }
-        }
-        return r;
-    }
-
-    // Points: P2 uses x, y, z; P3 and P1P1 use x, y, z, t (P1P1: ((X : Z), (Y : T))).
-
-    private static final class Point {
-        final int[] x = new int[10];
-        final int[] y = new int[10];
-        final int[] z = new int[10];
-        final int[] t = new int[10];
-    }
-
-    /** {@code (Y + X, Y - X, Z, 2dT)}. */
-    private static final class Cached {
-        final int[] yPlusX = new int[10];
-        final int[] yMinusX = new int[10];
-        final int[] z = new int[10];
-        final int[] t2d = new int[10];
-    }
-
-    private static int[] t(FieldElement e) {
-        return ((Ed25519FieldElement) e).t;
-    }
-
-    /** ge25519_p2_dbl (P3 input: T ignored). */
-    private static void p2Dbl(Point r, Point p, int[] t0) {
-        Ed25519FieldElement.sqr(p.x, r.x);
-        Ed25519FieldElement.sqr(p.y, r.z);
-        Ed25519FieldElement.sqr2(p.z, r.t);
-        add(p.x, p.y, r.y);
-        Ed25519FieldElement.sqr(r.y, t0);
-        add(r.z, r.x, r.y);
-        sub(r.z, r.x, r.z);
-        sub(t0, r.y, r.x);
-        sub(r.t, r.z, r.t);
-    }
-
-    /** ge25519_p3_dbl: via P2. */
-    private static void p3Dbl(Point r, Point p, int[] t0) {
-        p2Dbl(r, p, t0);
-    }
-
-    /** ge25519_p1p1_to_p2. */
-    private static void p1p1ToP2(Point r, Point p) {
-        Ed25519FieldElement.mul(p.x, p.t, r.x);
-        Ed25519FieldElement.mul(p.y, p.z, r.y);
-        Ed25519FieldElement.mul(p.z, p.t, r.z);
-    }
-
-    /** ge25519_p1p1_to_p3; {@code r} is not {@code p}. */
-    private static void p1p1ToP3(Point r, Point p) {
-        Ed25519FieldElement.mul(p.x, p.t, r.x);
-        Ed25519FieldElement.mul(p.y, p.z, r.y);
-        Ed25519FieldElement.mul(p.z, p.t, r.z);
-        Ed25519FieldElement.mul(p.x, p.y, r.t);
-    }
-
-    /** ge25519_p3_to_cached. */
-    private static void toCached(Cached r, Point p) {
-        add(p.y, p.x, r.yPlusX);
-        sub(p.y, p.x, r.yMinusX);
-        copy(p.z, r.z);
-        Ed25519FieldElement.mul(p.t, D2, r.t2d);
-    }
-
-    /** ge25519_add: {@code r (P1P1) = p (P3) + q}; {@code r} is not {@code p}. */
-    private static void add(Point r, Point p, Cached q, int[] t0) {
-        add(p.y, p.x, r.x);
-        sub(p.y, p.x, r.y);
-        Ed25519FieldElement.mul(r.x, q.yPlusX, r.z);
-        Ed25519FieldElement.mul(r.y, q.yMinusX, r.y);
-        Ed25519FieldElement.mul(q.t2d, p.t, r.t);
-        Ed25519FieldElement.mul(p.z, q.z, r.x);
-        add(r.x, r.x, t0);
-        sub(r.z, r.y, r.x);
-        add(r.z, r.y, r.y);
-        add(t0, r.t, r.z);
-        sub(t0, r.t, r.t);
-    }
-
-    /** ge25519_sub: {@code r (P1P1) = p (P3) - q}; {@code r} is not {@code p}. */
-    private static void sub(Point r, Point p, Cached q, int[] t0) {
-        add(p.y, p.x, r.x);
-        sub(p.y, p.x, r.y);
-        Ed25519FieldElement.mul(r.x, q.yMinusX, r.z);
-        Ed25519FieldElement.mul(r.y, q.yPlusX, r.y);
-        Ed25519FieldElement.mul(q.t2d, p.t, r.t);
-        Ed25519FieldElement.mul(p.z, q.z, r.x);
-        add(r.x, r.x, t0);
-        sub(r.z, r.y, r.x);
-        add(r.z, r.y, r.y);
-        sub(t0, r.t, r.z);
-        add(t0, r.t, r.t);
-    }
-
-    /** ge25519_madd: {@code r (P1P1) = p (P3) + q (precomputed)}; {@code r} is not {@code p}. */
-    private static void madd(Point r, Point p, int[] yPlusX, int[] yMinusX, int[] xy2d, int[] t0) {
-        add(p.y, p.x, r.x);
-        sub(p.y, p.x, r.y);
-        Ed25519FieldElement.mul(r.x, yPlusX, r.z);
-        Ed25519FieldElement.mul(r.y, yMinusX, r.y);
-        Ed25519FieldElement.mul(xy2d, p.t, r.t);
-        add(p.z, p.z, t0);
-        sub(r.z, r.y, r.x);
-        add(r.z, r.y, r.y);
-        add(t0, r.t, r.z);
-        sub(t0, r.t, r.t);
-    }
-
-    /** ge25519_msub: {@code r (P1P1) = p (P3) - q (precomputed)}; {@code r} is not {@code p}. */
-    private static void msub(Point r, Point p, int[] yPlusX, int[] yMinusX, int[] xy2d, int[] t0) {
-        add(p.y, p.x, r.x);
-        sub(p.y, p.x, r.y);
-        Ed25519FieldElement.mul(r.x, yMinusX, r.z);
-        Ed25519FieldElement.mul(r.y, yPlusX, r.y);
-        Ed25519FieldElement.mul(xy2d, p.t, r.t);
-        add(p.z, p.z, t0);
-        sub(r.z, r.y, r.x);
-        add(r.z, r.y, r.y);
-        sub(t0, r.t, r.z);
-        add(t0, r.t, r.t);
-    }
-
+    /** {@code Ed25519FieldElement.add}: {@code h[i] = f[i] + g[i]}. */
     private static void add(int[] f, int[] g, int[] h) {
         for (int i = 0; i < 10; i++) {
             h[i] = f[i] + g[i];
         }
     }
 
+    /** {@code Ed25519FieldElement.subtract}: {@code h[i] = f[i] - g[i]}. */
     private static void sub(int[] f, int[] g, int[] h) {
         for (int i = 0; i < 10; i++) {
             h[i] = f[i] - g[i];
         }
     }
-
-    private static void neg(int[] f, int[] h) {
-        for (int i = 0; i < 10; i++) {
-            h[i] = -f[i];
-        }
-    }
-
-    private static void copy(int[] f, int[] h) {
-        System.arraycopy(f, 0, h, 0, 10);
-    }
-
 }

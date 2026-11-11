@@ -297,11 +297,6 @@ public class Ed25519FieldElement extends FieldElement {
         return "[Ed25519FieldElement val="+Utils.bytesToHex(toByteArray())+"]";
     }
 
-    /** The field of this element, for {@link Ed25519VerifyEquation#supports}. */
-    Field field() {
-        return f;
-    }
-
     // In-place forms of multiply, square and squareAndDouble (the same code), for allocation-free verification.
     // h may be f or g: every input limb is read before h is written.
 
