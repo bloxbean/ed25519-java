@@ -25,8 +25,11 @@ import java.util.Arrays;
 import java.util.List;
 
 import net.i2p.crypto.eddsa.math.Curve;
+import net.i2p.crypto.eddsa.math.Field;
 import net.i2p.crypto.eddsa.math.FieldElement;
 import net.i2p.crypto.eddsa.math.GroupElement;
+import net.i2p.crypto.eddsa.math.bigint.BigIntegerLittleEndianEncoding;
+import net.i2p.crypto.eddsa.math.ed25519.Ed25519FieldElement;
 import net.i2p.crypto.eddsa.math.ed25519.Ed25519VerifyEquation;
 import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable;
 import net.i2p.crypto.eddsa.spec.EdDSAParameterSpec;
@@ -153,6 +156,42 @@ public class InPlaceVerifyTest {
         } catch (NullPointerException expected) {
             // as 0.3.1
         }
+    }
+
+    /** The identity as R with S = 0: SB - kA is the identity for A the identity, so 0.3.1 accepts it. */
+    private static byte[] identitySignature() {
+        byte[] sig = new byte[64];
+        sig[0] = 1;
+        return sig;
+    }
+
+    /** A coordinate with limbs outside what the field arithmetic takes keeps the 0.3.1 computation. */
+    @Test
+    public void aKeyPointWithOutOfBoundLimbsVerifiesAsRelease031() throws Exception {
+        Curve curve = SPEC.getCurve();
+        Field f = curve.getField();
+        int[] limbs = new int[10];
+        limbs[0] = Integer.MIN_VALUE;
+        FieldElement z = new Ed25519FieldElement(f, limbs);
+        GroupElement a = GroupElement.p3(curve, f.ZERO, z, z, f.ZERO);
+        assertFalse(Ed25519VerifyEquation.supports(a));
+        assertTrue(verify(new EdDSAPublicKeySpec(a, SPEC), new byte[0], identitySignature()));
+    }
+
+    /** A coordinate of another Field instance keeps the 0.3.1 computation, and the check does not throw. */
+    @Test
+    public void aKeyPointWithAForeignFieldVerifiesAsRelease031() throws Exception {
+        Curve curve = SPEC.getCurve();
+        Field f = curve.getField();
+        Field foreign = new Field(256,
+                Utils.hexToBytes("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"),
+                new BigIntegerLittleEndianEncoding());
+        GroupElement a = GroupElement.p3(curve, f.ZERO, f.ONE, f.ONE, new Ed25519FieldElement(foreign, new int[10]));
+        assertFalse(Ed25519VerifyEquation.supports(a));
+        assertTrue(verify(new EdDSAPublicKeySpec(a, SPEC), new byte[0], identitySignature()));
+        GroupElement standard = GroupElement.p3(curve, f.ZERO, f.ONE, f.ONE, f.ZERO);
+        assertTrue(Ed25519VerifyEquation.supports(standard));
+        assertTrue(verify(new EdDSAPublicKeySpec(standard, SPEC), new byte[0], identitySignature()));
     }
 
     /** Streaming input (update in pieces, without one-shot mode) verifies as one-shot input does. */

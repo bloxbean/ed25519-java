@@ -80,23 +80,28 @@ public final class Ed25519VerifyEquation {
     private static final byte[] ORDER = Utils.hexToBytes(
             "edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010");
 
+    /** Limb bounds of a field element the field arithmetic takes as input: {@code 1.1 * 2^25} and {@code 1.1 * 2^24}. */
+    private static final int EVEN_LIMB_BOUND = (int) (1.1 * (1 << 25));
+    private static final int ODD_LIMB_BOUND = (int) (1.1 * (1 << 24));
+
     /**
      * Whether {@link #holds} gives the outcome of {@code GroupElement.doubleScalarMultiplyVariableTime} for {@code a}:
-     * a P3 point of the standard curve with {@link Ed25519FieldElement} coordinates, {@code Z != 0},
-     * {@code T Z = X Y} and {@code (Y^2 - X^2) Z^2 = Z^4 + d X^2 Y^2}. Keys decoded from bytes always are. A point
-     * built with other coordinates through {@code GroupElement.p3} may not be, and {@code GroupElement.negate} and the
-     * table of {@code A, 3A, ..., 15A} treat such a point differently from this class's formulas.
+     * a P3 point of the standard curve instance whose coordinates are {@link Ed25519FieldElement}s of the standard
+     * field instance, with limbs within {@code 1.1 * 2^25} (even) and {@code 1.1 * 2^24} (odd), {@code Z != 0},
+     * {@code T Z = X Y} and {@code (Y^2 - X^2) Z^2 = Z^4 + d X^2 Y^2}. Keys decoded from bytes and points computed by
+     * this library always are. A point built through {@code GroupElement.p3} may not be, and
+     * {@code GroupElement.negate} and the table of {@code A, 3A, ..., 15A} treat such a point differently from this
+     * class. Each condition is checked before any arithmetic, so this method neither throws nor overflows.
      *
      * @param a a point
      * @return whether {@link #holds} may be used for it
      */
     public static boolean supports(GroupElement a) {
         if (a.getRepresentation() != GroupElement.Representation.P3
-                || !EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getCurve().equals(a.getCurve()))
+                || a.getCurve() != EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getCurve())
             return false;
         FieldElement x = a.getX(), y = a.getY(), z = a.getZ(), t = a.getT();
-        if (!(x instanceof Ed25519FieldElement && y instanceof Ed25519FieldElement
-                && z instanceof Ed25519FieldElement && t instanceof Ed25519FieldElement))
+        if (!(standard(x) && standard(y) && standard(z) && standard(t)))
             return false;
         if (!z.isNonZero())
             return false;
@@ -105,6 +110,21 @@ public final class Ed25519VerifyEquation {
         FieldElement xx = x.square(), yy = y.square(), zz = z.square();
         FieldElement d = EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getCurve().getD();
         return yy.subtract(xx).multiply(zz).equals(zz.square().add(d.multiply(xx).multiply(yy)));
+    }
+
+    /** An {@link Ed25519FieldElement} of the standard field instance with limbs within the input bounds. */
+    private static boolean standard(FieldElement e) {
+        if (!(e instanceof Ed25519FieldElement) || ((Ed25519FieldElement) e).field() != FIELD)
+            return false;
+        int[] limbs = ((Ed25519FieldElement) e).t;
+        if (limbs == null || limbs.length != 10)
+            return false;
+        for (int i = 0; i < 10; i++) {
+            int bound = (i & 1) == 0 ? EVEN_LIMB_BOUND : ODD_LIMB_BOUND;
+            if (limbs[i] > bound || limbs[i] < -bound)
+                return false;
+        }
+        return true;
     }
 
     /**
