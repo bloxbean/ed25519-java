@@ -175,7 +175,132 @@ public class Ed25519FieldElement extends FieldElement {
      * @return The (reasonably reduced) field element this * val.
      */
     public FieldElement multiply(FieldElement val) {
-        int[] g = ((Ed25519FieldElement)val).t;
+        int[] h = new int[10];
+        mul(t, ((Ed25519FieldElement)val).t, h);
+        return new Ed25519FieldElement(f, h);
+    }
+
+    /**
+     * $h = f * f$
+     * <p>
+     * Can overlap $h$ with $f$.
+     * <p>
+     * Preconditions:
+     * </p><ul>
+     * <li>$|f|$ bounded by $1.65*2^{26},1.65*2^{25},1.65*2^{26},1.65*2^{25},$ etc.
+     * </ul><p>
+     * Postconditions:
+     * </p><ul>
+     * <li>$|h|$ bounded by $1.01*2^{25},1.01*2^{24},1.01*2^{25},1.01*2^{24},$ etc.
+     * </ul><p>
+     * See {@link #multiply(FieldElement)} for discussion
+     * of implementation strategy.
+     *
+     * @return The (reasonably reduced) square of this field element.
+     */
+    public FieldElement square() {
+        int[] h = new int[10];
+        sqr(t, h);
+        return new Ed25519FieldElement(f, h);
+    }
+
+    /**
+     * $h = 2 * f * f$
+     * <p>
+     * Can overlap $h$ with $f$.
+     * <p>
+     * Preconditions:
+     * </p><ul>
+     * <li>$|f|$ bounded by $1.65*2^{26},1.65*2^{25},1.65*2^{26},1.65*2^{25},$ etc.
+     * </ul><p>
+     * Postconditions:
+     * </p><ul>
+     * <li>$|h|$ bounded by $1.01*2^{25},1.01*2^{24},1.01*2^{25},1.01*2^{24},$ etc.
+     * </ul><p>
+     * See {@link #multiply(FieldElement)} for discussion
+     * of implementation strategy.
+     *
+     * @return The (reasonably reduced) square of this field element times 2.
+     */
+    public FieldElement squareAndDouble() {
+        int[] h = new int[10];
+        sqr2(t, h);
+        return new Ed25519FieldElement(f, h);
+    }
+
+    /**
+     * Invert this field element.
+     * <p>
+     * The inverse is found via Fermat's little theorem:<br>
+     * $a^p \cong a \mod p$ and therefore $a^{(p-2)} \cong a^{-1} \mod p$
+     *
+     * @return The inverse of this field element.
+     */
+    public FieldElement invert() {
+        int[] h = new int[10];
+        invert(t, h);
+        return new Ed25519FieldElement(f, h);
+    }
+
+    /**
+     * Gets this field element to the power of $(2^{252} - 3)$.
+     * This is a helper function for calculating the square root.
+     * <p>
+     * TODO-CR BR: I think it makes sense to have a sqrt function.
+     *
+     * @return This field element to the power of $(2^{252} - 3)$.
+     */
+    public FieldElement pow22523() {
+        int[] h = new int[10];
+        pow22523(t, h);
+        return new Ed25519FieldElement(f, h);
+    }
+
+    /**
+     * Constant-time conditional move. Well, actually it is a conditional copy.
+     * Logic is inspired by the SUPERCOP implementation at:
+     *   https://github.com/floodyberry/supercop/blob/master/crypto_sign/ed25519/ref10/fe_cmov.c
+     *
+     * @param val the other field element.
+     * @param b must be 0 or 1, otherwise results are undefined.
+     * @return a copy of this if $b == 0$, or a copy of val if $b == 1$.
+     */
+    @Override
+    public FieldElement cmov(FieldElement val, int b) {
+        Ed25519FieldElement that = (Ed25519FieldElement) val;
+        b = -b;
+        int[] result = new int[10];
+        for (int i = 0; i < 10; i++) {
+            result[i] = this.t[i];
+            int x = this.t[i] ^ that.t[i];
+            x &= b;
+            result[i] ^= x;
+        }
+        return new Ed25519FieldElement(this.f, result);
+    }
+
+    @Override
+    public int hashCode() {
+        return Arrays.hashCode(t);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof Ed25519FieldElement))
+            return false;
+        Ed25519FieldElement fe = (Ed25519FieldElement) obj;
+        return 1==Utils.equal(toByteArray(), fe.toByteArray());
+    }
+
+    @Override
+    public String toString() {
+        return "[Ed25519FieldElement val="+Utils.bytesToHex(toByteArray())+"]";
+    }
+
+    // In-place forms of multiply, square and squareAndDouble (the same code), for allocation-free verification.
+    // h may be f or g: every input limb is read before h is written.
+
+    static void mul(int[] t, int[] g, int[] h) {
         int g1_19 = 19 * g[1]; /* 1.959375*2^29 */
         int g2_19 = 19 * g[2]; /* 1.959375*2^30; still ok */
         int g3_19 = 19 * g[3];
@@ -373,7 +498,6 @@ public class Ed25519FieldElement extends FieldElement {
         /* |h0| <= 2^25; from now on fits into int32 unchanged */
         /* |h1| <= 1.01*2^24 */
 
-        int[] h = new int[10];
         h[0] = (int) h0;
         h[1] = (int) h1;
         h[2] = (int) h2;
@@ -384,28 +508,9 @@ public class Ed25519FieldElement extends FieldElement {
         h[7] = (int) h7;
         h[8] = (int) h8;
         h[9] = (int) h9;
-        return new Ed25519FieldElement(f, h);
-    }
+        }
 
-    /**
-     * $h = f * f$
-     * <p>
-     * Can overlap $h$ with $f$.
-     * <p>
-     * Preconditions:
-     * </p><ul>
-     * <li>$|f|$ bounded by $1.65*2^{26},1.65*2^{25},1.65*2^{26},1.65*2^{25},$ etc.
-     * </ul><p>
-     * Postconditions:
-     * </p><ul>
-     * <li>$|h|$ bounded by $1.01*2^{25},1.01*2^{24},1.01*2^{25},1.01*2^{24},$ etc.
-     * </ul><p>
-     * See {@link #multiply(FieldElement)} for discussion
-     * of implementation strategy.
-     *
-     * @return The (reasonably reduced) square of this field element.
-     */
-    public FieldElement square() {
+    static void sqr(int[] t, int[] h) {
         int f0 = t[0];
         int f1 = t[1];
         int f2 = t[2];
@@ -529,7 +634,6 @@ public class Ed25519FieldElement extends FieldElement {
 
         carry0 = (h0 + (long) (1<<25)) >> 26; h1 += carry0; h0 -= carry0 << 26;
 
-        int[] h = new int[10];
         h[0] = (int) h0;
         h[1] = (int) h1;
         h[2] = (int) h2;
@@ -540,28 +644,9 @@ public class Ed25519FieldElement extends FieldElement {
         h[7] = (int) h7;
         h[8] = (int) h8;
         h[9] = (int) h9;
-        return new Ed25519FieldElement(f, h);
-    }
+        }
 
-    /**
-     * $h = 2 * f * f$
-     * <p>
-     * Can overlap $h$ with $f$.
-     * <p>
-     * Preconditions:
-     * </p><ul>
-     * <li>$|f|$ bounded by $1.65*2^{26},1.65*2^{25},1.65*2^{26},1.65*2^{25},$ etc.
-     * </ul><p>
-     * Postconditions:
-     * </p><ul>
-     * <li>$|h|$ bounded by $1.01*2^{25},1.01*2^{24},1.01*2^{25},1.01*2^{24},$ etc.
-     * </ul><p>
-     * See {@link #multiply(FieldElement)} for discussion
-     * of implementation strategy.
-     *
-     * @return The (reasonably reduced) square of this field element times 2.
-     */
-    public FieldElement squareAndDouble() {
+    static void sqr2(int[] t, int[] h) {
         int f0 = t[0];
         int f1 = t[1];
         int f2 = t[2];
@@ -691,7 +776,6 @@ public class Ed25519FieldElement extends FieldElement {
 
         carry0 = (h0 + (long) (1<<25)) >> 26; h1 += carry0; h0 -= carry0 << 26;
 
-        int[] h = new int[10];
         h[0] = (int) h0;
         h[1] = (int) h1;
         h[2] = (int) h2;
@@ -702,287 +786,112 @@ public class Ed25519FieldElement extends FieldElement {
         h[7] = (int) h7;
         h[8] = (int) h8;
         h[9] = (int) h9;
-        return new Ed25519FieldElement(f, h);
-    }
+        }
 
-    /**
-     * Invert this field element.
-     * <p>
-     * The inverse is found via Fermat's little theorem:<br>
-     * $a^p \cong a \mod p$ and therefore $a^{(p-2)} \cong a^{-1} \mod p$
-     *
-     * @return The inverse of this field element.
-     */
-    public FieldElement invert() {
-        FieldElement t0, t1, t2, t3;
-
-        // 2 == 2 * 1
-        t0 = square();
-
-        // 4 == 2 * 2
-        t1 = t0.square();
-
-        // 8 == 2 * 4
-        t1 = t1.square();
-
-        // 9 == 8 + 1
-        t1 = multiply(t1);
-
-        // 11 == 9 + 2
-        t0 = t0.multiply(t1);
-
-        // 22 == 2 * 11
-        t2 = t0.square();
-
-        // 31 == 22 + 9
-        t1 = t1.multiply(t2);
-
-        // 2^6 - 2^1
-        t2 = t1.square();
-
-        // 2^10 - 2^5
+    /** {@link #invert()} on arrays: the same chain of squarings and multiplications. */
+    static void invert(int[] z, int[] out) {
+        int[] t0 = new int[10];
+        int[] t1 = new int[10];
+        int[] t2 = new int[10];
+        int[] t3 = new int[10];
+        sqr(z, t0);
+        sqr(t0, t1);
+        sqr(t1, t1);
+        mul(z, t1, t1);
+        mul(t0, t1, t0);
+        sqr(t0, t2);
+        mul(t1, t2, t1);
+        sqr(t1, t2);
         for (int i = 1; i < 5; ++i) {
-            t2 = t2.square();
+            sqr(t2, t2);
         }
-
-        // 2^10 - 2^0
-        t1 = t2.multiply(t1);
-
-        // 2^11 - 2^1
-        t2 = t1.square();
-
-        // 2^20 - 2^10
+        mul(t2, t1, t1);
+        sqr(t1, t2);
         for (int i = 1; i < 10; ++i) {
-            t2 = t2.square();
+            sqr(t2, t2);
         }
-
-        // 2^20 - 2^0
-        t2 = t2.multiply(t1);
-
-        // 2^21 - 2^1
-        t3 = t2.square();
-
-        // 2^40 - 2^20
+        mul(t2, t1, t2);
+        sqr(t2, t3);
         for (int i = 1; i < 20; ++i) {
-            t3 = t3.square();
+            sqr(t3, t3);
         }
-
-        // 2^40 - 2^0
-        t2 = t3.multiply(t2);
-
-        // 2^41 - 2^1
-        t2 = t2.square();
-
-        // 2^50 - 2^10
+        mul(t3, t2, t2);
+        sqr(t2, t2);
         for (int i = 1; i < 10; ++i) {
-            t2 = t2.square();
+            sqr(t2, t2);
         }
-
-        // 2^50 - 2^0
-        t1 = t2.multiply(t1);
-
-        // 2^51 - 2^1
-        t2 = t1.square();
-
-        // 2^100 - 2^50
+        mul(t2, t1, t1);
+        sqr(t1, t2);
         for (int i = 1; i < 50; ++i) {
-            t2 = t2.square();
+            sqr(t2, t2);
         }
-
-        // 2^100 - 2^0
-        t2 = t2.multiply(t1);
-
-        // 2^101 - 2^1
-        t3 = t2.square();
-
-        // 2^200 - 2^100
+        mul(t2, t1, t2);
+        sqr(t2, t3);
         for (int i = 1; i < 100; ++i) {
-            t3 = t3.square();
+            sqr(t3, t3);
         }
-
-        // 2^200 - 2^0
-        t2 = t3.multiply(t2);
-
-        // 2^201 - 2^1
-        t2 = t2.square();
-
-        // 2^250 - 2^50
+        mul(t3, t2, t2);
+        sqr(t2, t2);
         for (int i = 1; i < 50; ++i) {
-            t2 = t2.square();
+            sqr(t2, t2);
         }
-
-        // 2^250 - 2^0
-        t1 = t2.multiply(t1);
-
-        // 2^251 - 2^1
-        t1 = t1.square();
-
-        // 2^255 - 2^5
+        mul(t2, t1, t1);
+        sqr(t1, t1);
         for (int i = 1; i < 5; ++i) {
-            t1 = t1.square();
+            sqr(t1, t1);
         }
-
-        // 2^255 - 21
-        return t1.multiply(t0);
+        mul(t1, t0, out);
     }
 
-    /**
-     * Gets this field element to the power of $(2^{252} - 3)$.
-     * This is a helper function for calculating the square root.
-     * <p>
-     * TODO-CR BR: I think it makes sense to have a sqrt function.
-     *
-     * @return This field element to the power of $(2^{252} - 3)$.
-     */
-    public FieldElement pow22523() {
-        FieldElement t0, t1, t2;
-
-        // 2 == 2 * 1
-        t0 = square();
-
-        // 4 == 2 * 2
-        t1 = t0.square();
-
-        // 8 == 2 * 4
-        t1 = t1.square();
-
-        // z9 = z1*z8
-        t1 = multiply(t1);
-
-        // 11 == 9 + 2
-        t0 = t0.multiply(t1);
-
-        // 22 == 2 * 11
-        t0 = t0.square();
-
-        // 31 == 22 + 9
-        t0 = t1.multiply(t0);
-
-        // 2^6 - 2^1
-        t1 = t0.square();
-
-        // 2^10 - 2^5
+    /** {@link #pow22523()} on arrays: the same chain of squarings and multiplications. */
+    static void pow22523(int[] z, int[] out) {
+        int[] t0 = new int[10];
+        int[] t1 = new int[10];
+        int[] t2 = new int[10];
+        sqr(z, t0);
+        sqr(t0, t1);
+        sqr(t1, t1);
+        mul(z, t1, t1);
+        mul(t0, t1, t0);
+        sqr(t0, t0);
+        mul(t1, t0, t0);
+        sqr(t0, t1);
         for (int i = 1; i < 5; ++i) {
-            t1 = t1.square();
+            sqr(t1, t1);
         }
-
-        // 2^10 - 2^0
-        t0 = t1.multiply(t0);
-
-        // 2^11 - 2^1
-        t1 = t0.square();
-
-        // 2^20 - 2^10
+        mul(t1, t0, t0);
+        sqr(t0, t1);
         for (int i = 1; i < 10; ++i) {
-            t1 = t1.square();
+            sqr(t1, t1);
         }
-
-        // 2^20 - 2^0
-        t1 = t1.multiply(t0);
-
-        // 2^21 - 2^1
-        t2 = t1.square();
-
-        // 2^40 - 2^20
+        mul(t1, t0, t1);
+        sqr(t1, t2);
         for (int i = 1; i < 20; ++i) {
-            t2 = t2.square();
+            sqr(t2, t2);
         }
-
-        // 2^40 - 2^0
-        t1 = t2.multiply(t1);
-
-        // 2^41 - 2^1
-        t1 = t1.square();
-
-        // 2^50 - 2^10
+        mul(t2, t1, t1);
+        sqr(t1, t1);
         for (int i = 1; i < 10; ++i) {
-            t1 = t1.square();
+            sqr(t1, t1);
         }
-
-        // 2^50 - 2^0
-        t0 = t1.multiply(t0);
-
-        // 2^51 - 2^1
-        t1 = t0.square();
-
-        // 2^100 - 2^50
+        mul(t1, t0, t0);
+        sqr(t0, t1);
         for (int i = 1; i < 50; ++i) {
-            t1 = t1.square();
+            sqr(t1, t1);
         }
-
-        // 2^100 - 2^0
-        t1 = t1.multiply(t0);
-
-        // 2^101 - 2^1
-        t2 = t1.square();
-
-        // 2^200 - 2^100
+        mul(t1, t0, t1);
+        sqr(t1, t2);
         for (int i = 1; i < 100; ++i) {
-            t2 = t2.square();
+            sqr(t2, t2);
         }
-
-        // 2^200 - 2^0
-        t1 = t2.multiply(t1);
-
-        // 2^201 - 2^1
-        t1 = t1.square();
-
-        // 2^250 - 2^50
+        mul(t2, t1, t1);
+        sqr(t1, t1);
         for (int i = 1; i < 50; ++i) {
-            t1 = t1.square();
+            sqr(t1, t1);
         }
-
-        // 2^250 - 2^0
-        t0 = t1.multiply(t0);
-
-        // 2^251 - 2^1
-        t0 = t0.square();
-
-        // 2^252 - 2^2
-        t0 = t0.square();
-
-        // 2^252 - 3
-        return multiply(t0);
-    }
-
-    /**
-     * Constant-time conditional move. Well, actually it is a conditional copy.
-     * Logic is inspired by the SUPERCOP implementation at:
-     *   https://github.com/floodyberry/supercop/blob/master/crypto_sign/ed25519/ref10/fe_cmov.c
-     *
-     * @param val the other field element.
-     * @param b must be 0 or 1, otherwise results are undefined.
-     * @return a copy of this if $b == 0$, or a copy of val if $b == 1$.
-     */
-    @Override
-    public FieldElement cmov(FieldElement val, int b) {
-        Ed25519FieldElement that = (Ed25519FieldElement) val;
-        b = -b;
-        int[] result = new int[10];
-        for (int i = 0; i < 10; i++) {
-            result[i] = this.t[i];
-            int x = this.t[i] ^ that.t[i];
-            x &= b;
-            result[i] ^= x;
-        }
-        return new Ed25519FieldElement(this.f, result);
-    }
-
-    @Override
-    public int hashCode() {
-        return Arrays.hashCode(t);
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-        if (!(obj instanceof Ed25519FieldElement))
-            return false;
-        Ed25519FieldElement fe = (Ed25519FieldElement) obj;
-        return 1==Utils.equal(toByteArray(), fe.toByteArray());
-    }
-
-    @Override
-    public String toString() {
-        return "[Ed25519FieldElement val="+Utils.bytesToHex(toByteArray())+"]";
+        mul(t1, t0, t0);
+        sqr(t0, t0);
+        sqr(t0, t0);
+        mul(z, t0, out);
     }
 }

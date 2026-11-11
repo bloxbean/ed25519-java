@@ -31,6 +31,8 @@ import net.i2p.crypto.eddsa.math.Curve;
 import net.i2p.crypto.eddsa.math.GroupElement;
 import net.i2p.crypto.eddsa.math.ScalarOps;
 import net.i2p.crypto.eddsa.math.bigint.BigIntegerLittleEndianEncoding;
+import net.i2p.crypto.eddsa.math.ed25519.Ed25519VerifyEquation;
+import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable;
 
 /**
  * Signing and verification for EdDSA.
@@ -315,6 +317,12 @@ public final class EdDSAEngine extends Signature {
             return false;
 
         // R = SB - H(Rbar,Abar,M)A
+        GroupElement A = ((EdDSAPublicKey) key).getA();
+        if (EdDSANamedCurveTable.ED_25519_CURVE_SPEC.equals(key.getParams())
+                && A.getRepresentation() == GroupElement.Representation.P3) {
+            // The same computation and comparison as below, on field elements updated in place.
+            return Ed25519VerifyEquation.holds(A, h, sigBytes);
+        }
         GroupElement R = key.getParams().getB().doubleScalarMultiplyVariableTime(
                 ((EdDSAPublicKey) key).getNegativeA(), h, Sbyte);
 
