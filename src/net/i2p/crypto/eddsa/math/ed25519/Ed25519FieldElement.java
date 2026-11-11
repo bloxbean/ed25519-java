@@ -27,6 +27,12 @@ import java.util.Arrays;
  */
 public class Ed25519FieldElement extends FieldElement {
     /**
+     * The value 0.3.1 computed implicitly; declared so that adding members keeps
+     * serialized elements readable across versions.
+     */
+    private static final long serialVersionUID = 8932514744815372482L;
+
+    /**
      * Variable is package private for encoding.
      */
     final int[] t;

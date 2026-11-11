@@ -11,10 +11,13 @@
  */
 package net.i2p.crypto.eddsa.math.ed25519;
 
+import net.i2p.crypto.eddsa.Utils;
 import net.i2p.crypto.eddsa.math.*;
+import net.i2p.crypto.eddsa.math.bigint.BigIntegerLittleEndianEncoding;
 import org.hamcrest.core.*;
 import org.junit.*;
 
+import java.io.*;
 import java.math.BigInteger;
 
 /**
@@ -99,4 +102,34 @@ public class Ed25519FieldElementTest extends AbstractFieldElementTest {
     }
 
     // endregion
+
+    /**
+     * 0.3.1 did not declare a serialVersionUID; its computed value must stay the same
+     * so that elements serialized by 0.3.1 still deserialize (and vice versa).
+     */
+    @Test
+    public void serialVersionUidMatchesVersion031() {
+        Assert.assertEquals(8932514744815372482L,
+                ObjectStreamClass.lookup(Ed25519FieldElement.class).getSerialVersionUID());
+    }
+
+    /**
+     * The standard field's encoding is not serializable, so this uses a field with
+     * BigIntegerLittleEndianEncoding, as a caller who serializes elements must.
+     */
+    @Test
+    public void serializationRoundTrip() throws Exception {
+        Field field = new Field(256,
+                Utils.hexToBytes("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"),
+                new BigIntegerLittleEndianEncoding());
+        int[] limbs = {1, -2, 3, -4, 5, -6, 7, -8, 9, -10};
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream out = new ObjectOutputStream(bytes)) {
+            out.writeObject(new Ed25519FieldElement(field, limbs));
+        }
+        try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            Ed25519FieldElement read = (Ed25519FieldElement) in.readObject();
+            Assert.assertArrayEquals(limbs, read.t);
+        }
+    }
 }
