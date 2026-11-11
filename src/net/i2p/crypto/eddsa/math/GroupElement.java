@@ -1048,7 +1048,8 @@ public class GroupElement implements Serializable {
             if (aslide[i] != 0 || bslide[i] != 0) break;
         }
 
-        if (i >= 0 && A != null) {
+        if (i >= 0 && A != null && getClass() == GroupElement.class && A.getClass() == GroupElement.class
+                && r != null && r.getClass() == GroupElement.class) {
             // The same loop on limbs updated in place, when every element it reads is a plain Ed25519 field element of
             // a well-formed table: the same arithmetic in the same order, so the same limbs. Anything else stays here.
             FieldElement[][] aTable = plainTable(A.dblPrecmp);
@@ -1058,7 +1059,8 @@ public class GroupElement implements Serializable {
                     && r.Y.f == r.X.f && r.Z.f == r.X.f) {
                 int[][] xyz = Ed25519VerifyEquation.doubleScalarMultiply(aslide, aTable, bslide, bTable,
                         new FieldElement[] {r.X, r.Y, r.Z});
-                return p2(this.curve, new Ed25519FieldElement(r.X.f, xyz[0]), new Ed25519FieldElement(r.X.f, xyz[1]),
+                // The loop's result carries the curve of r, as each step of the loop below takes this.curve of r.
+                return p2(r.curve, new Ed25519FieldElement(r.X.f, xyz[0]), new Ed25519FieldElement(r.X.f, xyz[1]),
                         new Ed25519FieldElement(r.X.f, xyz[2]));
             }
         }
@@ -1094,7 +1096,8 @@ public class GroupElement implements Serializable {
         FieldElement[][] out = new FieldElement[8][];
         for (int j = 0; j < 8; j++) {
             GroupElement q = table[j];
-            if (q == null || q.repr != Representation.PRECOMP || !Ed25519VerifyEquation.isPlain(q.X)
+            if (q == null || q.getClass() != GroupElement.class || q.repr != Representation.PRECOMP
+                    || !Ed25519VerifyEquation.isPlain(q.X)
                     || !Ed25519VerifyEquation.isPlain(q.Y) || !Ed25519VerifyEquation.isPlain(q.Z))
                 return null;
             out[j] = new FieldElement[] {q.X, q.Y, q.Z};

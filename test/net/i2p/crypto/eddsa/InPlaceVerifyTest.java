@@ -175,6 +175,84 @@ public class InPlaceVerifyTest {
         assertTrue(verify(new EdDSAPublicKeySpec(standard, SPEC), new byte[0], identitySignature()));
     }
 
+    /** A curve whose zero point overrides dbl(): 0.3.1 calls that dbl(), so this version does too. */
+    @Test
+    public void aCurveWhoseZeroPointOverridesDblVerifiesAsRelease031() throws Exception {
+        final Curve standard = SPEC.getCurve();
+        final Field f = standard.getField();
+        Curve custom = new Curve(f, Utils.hexToBytes("a3785913ca4deb75abd841414d0a700098e879777940c78c73fe6f2bee6c0352"),
+                standard.getI()) {
+            @Override
+            public GroupElement getZero(GroupElement.Representation repr) {
+                if (repr != GroupElement.Representation.P2)
+                    return super.getZero(repr);
+                return new GroupElement(this, GroupElement.Representation.P2, f.ZERO, f.ONE, f.ONE, null) {
+                    @Override
+                    public GroupElement dbl() {
+                        throw new IllegalStateException("overridden dbl");
+                    }
+                };
+            }
+        };
+        GroupElement b = new GroupElement(custom, SPEC.getB().toByteArray(), true);
+        EdDSAParameterSpec spec = new EdDSAParameterSpec(custom, SPEC.getHashAlgorithm(), SPEC.getScalarOps(), b);
+        GroupElement identity = GroupElement.p3(custom, f.ZERO, f.ONE, f.ONE, f.ZERO);
+        EdDSAEngine engine = new EdDSAEngine(MessageDigest.getInstance(SPEC.getHashAlgorithm()));
+        engine.initVerify(new EdDSAPublicKey(new EdDSAPublicKeySpec(identity, spec)));
+        engine.update(new byte[0]);
+        try {
+            engine.verify(identitySignature());
+            fail("0.3.1 calls the overridden dbl");
+        } catch (IllegalStateException expected) {
+            assertEquals("overridden dbl", expected.getMessage());
+        }
+    }
+
+    /** invert and pow22523 of a subclass go through its square() and multiply(), as in 0.3.1. */
+    @Test
+    public void exponentiationOfASubclassCallsItsOverrides() throws Exception {
+        final Field f = SPEC.getCurve().getField();
+        int[] two = new int[10];
+        two[0] = 2;
+        FieldElement squareThrows = new Ed25519FieldElement(f, two.clone()) {
+            @Override
+            public FieldElement square() {
+                throw new IllegalStateException("square");
+            }
+        };
+        FieldElement multiplyThrows = new Ed25519FieldElement(f, two.clone()) {
+            @Override
+            public FieldElement multiply(FieldElement val) {
+                throw new IllegalStateException("multiply");
+            }
+        };
+        for (FieldElement e : new FieldElement[] {squareThrows, multiplyThrows}) {
+            try {
+                e.invert();
+                fail("0.3.1 calls the override");
+            } catch (IllegalStateException expected) {
+                // as 0.3.1
+            }
+            try {
+                e.pow22523();
+                fail("0.3.1 calls the override");
+            } catch (IllegalStateException expected) {
+                // as 0.3.1
+            }
+        }
+        // Encoding a P3 point with such a Z inverts Z.
+        GroupElement p = GroupElement.p3(SPEC.getCurve(), f.ZERO, f.ONE, squareThrows, f.ZERO);
+        try {
+            p.toByteArray();
+            fail("0.3.1 calls the override");
+        } catch (IllegalStateException expected) {
+            // as 0.3.1
+        }
+        // The plain class keeps its results.
+        FieldElement plain = new Ed25519FieldElement(f, two.clone());
+        assertEquals(f.ONE, plain.invert().multiply(plain));
+    }
+
     /** Streaming input (update in pieces, without one-shot mode) verifies as one-shot input does. */
     @Test
     public void verifiesStreamedInput() throws Exception {

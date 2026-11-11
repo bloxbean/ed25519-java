@@ -237,9 +237,125 @@ public class Ed25519FieldElement extends FieldElement {
      * @return The inverse of this field element.
      */
     public FieldElement invert() {
+        if (getClass() != Ed25519FieldElement.class)
+            return invertByCalls();
         int[] h = new int[10];
         invert(t, h);
         return new Ed25519FieldElement(f, h);
+    }
+
+    /** 0.3.1's {@link #invert()}, through {@link #square()} and {@link #multiply}, which a subclass may override. */
+    private FieldElement invertByCalls() {
+        FieldElement t0, t1, t2, t3;
+
+        // 2 == 2 * 1
+        t0 = square();
+
+        // 4 == 2 * 2
+        t1 = t0.square();
+
+        // 8 == 2 * 4
+        t1 = t1.square();
+
+        // 9 == 8 + 1
+        t1 = multiply(t1);
+
+        // 11 == 9 + 2
+        t0 = t0.multiply(t1);
+
+        // 22 == 2 * 11
+        t2 = t0.square();
+
+        // 31 == 22 + 9
+        t1 = t1.multiply(t2);
+
+        // 2^6 - 2^1
+        t2 = t1.square();
+
+        // 2^10 - 2^5
+        for (int i = 1; i < 5; ++i) {
+            t2 = t2.square();
+        }
+
+        // 2^10 - 2^0
+        t1 = t2.multiply(t1);
+
+        // 2^11 - 2^1
+        t2 = t1.square();
+
+        // 2^20 - 2^10
+        for (int i = 1; i < 10; ++i) {
+            t2 = t2.square();
+        }
+
+        // 2^20 - 2^0
+        t2 = t2.multiply(t1);
+
+        // 2^21 - 2^1
+        t3 = t2.square();
+
+        // 2^40 - 2^20
+        for (int i = 1; i < 20; ++i) {
+            t3 = t3.square();
+        }
+
+        // 2^40 - 2^0
+        t2 = t3.multiply(t2);
+
+        // 2^41 - 2^1
+        t2 = t2.square();
+
+        // 2^50 - 2^10
+        for (int i = 1; i < 10; ++i) {
+            t2 = t2.square();
+        }
+
+        // 2^50 - 2^0
+        t1 = t2.multiply(t1);
+
+        // 2^51 - 2^1
+        t2 = t1.square();
+
+        // 2^100 - 2^50
+        for (int i = 1; i < 50; ++i) {
+            t2 = t2.square();
+        }
+
+        // 2^100 - 2^0
+        t2 = t2.multiply(t1);
+
+        // 2^101 - 2^1
+        t3 = t2.square();
+
+        // 2^200 - 2^100
+        for (int i = 1; i < 100; ++i) {
+            t3 = t3.square();
+        }
+
+        // 2^200 - 2^0
+        t2 = t3.multiply(t2);
+
+        // 2^201 - 2^1
+        t2 = t2.square();
+
+        // 2^250 - 2^50
+        for (int i = 1; i < 50; ++i) {
+            t2 = t2.square();
+        }
+
+        // 2^250 - 2^0
+        t1 = t2.multiply(t1);
+
+        // 2^251 - 2^1
+        t1 = t1.square();
+
+        // 2^255 - 2^5
+        for (int i = 1; i < 5; ++i) {
+            t1 = t1.square();
+        }
+
+        // 2^255 - 21
+        return t1.multiply(t0);
     }
 
     /**
@@ -251,9 +367,123 @@ public class Ed25519FieldElement extends FieldElement {
      * @return This field element to the power of $(2^{252} - 3)$.
      */
     public FieldElement pow22523() {
+        if (getClass() != Ed25519FieldElement.class)
+            return pow22523ByCalls();
         int[] h = new int[10];
         pow22523(t, h);
         return new Ed25519FieldElement(f, h);
+    }
+
+    /** 0.3.1's {@link #pow22523()}, through {@link #square()} and {@link #multiply}, which a subclass may override. */
+    private FieldElement pow22523ByCalls() {
+        FieldElement t0, t1, t2;
+
+        // 2 == 2 * 1
+        t0 = square();
+
+        // 4 == 2 * 2
+        t1 = t0.square();
+
+        // 8 == 2 * 4
+        t1 = t1.square();
+
+        // z9 = z1*z8
+        t1 = multiply(t1);
+
+        // 11 == 9 + 2
+        t0 = t0.multiply(t1);
+
+        // 22 == 2 * 11
+        t0 = t0.square();
+
+        // 31 == 22 + 9
+        t0 = t1.multiply(t0);
+
+        // 2^6 - 2^1
+        t1 = t0.square();
+
+        // 2^10 - 2^5
+        for (int i = 1; i < 5; ++i) {
+            t1 = t1.square();
+        }
+
+        // 2^10 - 2^0
+        t0 = t1.multiply(t0);
+
+        // 2^11 - 2^1
+        t1 = t0.square();
+
+        // 2^20 - 2^10
+        for (int i = 1; i < 10; ++i) {
+            t1 = t1.square();
+        }
+
+        // 2^20 - 2^0
+        t1 = t1.multiply(t0);
+
+        // 2^21 - 2^1
+        t2 = t1.square();
+
+        // 2^40 - 2^20
+        for (int i = 1; i < 20; ++i) {
+            t2 = t2.square();
+        }
+
+        // 2^40 - 2^0
+        t1 = t2.multiply(t1);
+
+        // 2^41 - 2^1
+        t1 = t1.square();
+
+        // 2^50 - 2^10
+        for (int i = 1; i < 10; ++i) {
+            t1 = t1.square();
+        }
+
+        // 2^50 - 2^0
+        t0 = t1.multiply(t0);
+
+        // 2^51 - 2^1
+        t1 = t0.square();
+
+        // 2^100 - 2^50
+        for (int i = 1; i < 50; ++i) {
+            t1 = t1.square();
+        }
+
+        // 2^100 - 2^0
+        t1 = t1.multiply(t0);
+
+        // 2^101 - 2^1
+        t2 = t1.square();
+
+        // 2^200 - 2^100
+        for (int i = 1; i < 100; ++i) {
+            t2 = t2.square();
+        }
+
+        // 2^200 - 2^0
+        t1 = t2.multiply(t1);
+
+        // 2^201 - 2^1
+        t1 = t1.square();
+
+        // 2^250 - 2^50
+        for (int i = 1; i < 50; ++i) {
+            t1 = t1.square();
+        }
+
+        // 2^250 - 2^0
+        t0 = t1.multiply(t0);
+
+        // 2^251 - 2^1
+        t0 = t0.square();
+
+        // 2^252 - 2^2
+        t0 = t0.square();
+
+        // 2^252 - 3
+        return multiply(t0);
     }
 
     /**
