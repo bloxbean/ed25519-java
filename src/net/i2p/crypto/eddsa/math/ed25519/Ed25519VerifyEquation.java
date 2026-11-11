@@ -11,7 +11,9 @@
  */
 package net.i2p.crypto.eddsa.math.ed25519;
 
+import net.i2p.crypto.eddsa.Utils;
 import net.i2p.crypto.eddsa.math.Field;
+import net.i2p.crypto.eddsa.math.FieldElement;
 import net.i2p.crypto.eddsa.math.GroupElement;
 import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable;
 
@@ -21,7 +23,8 @@ import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable;
  * {@code ge_double_scalarmult_vartime}), then the encoding of {@code R'} compared with the bytes of {@code R}, as
  * {@link net.i2p.crypto.eddsa.EdDSAEngine} does. It gives the same answers without a new object per field operation.
  * <p>
- * Internal to {@code EdDSAEngine}; public only because the engine is in another package.
+ * Internal to {@code EdDSAEngine}, public only because the engine is in another package: not a stable API. The engine
+ * uses it only for {@code EdDSANamedCurveTable.ED_25519_CURVE_SPEC} and a key point that {@link #supports} accepts.
  */
 public final class Ed25519VerifyEquation {
 
@@ -73,13 +76,47 @@ public final class Ed25519VerifyEquation {
     private Ed25519VerifyEquation() {
     }
 
+    /** The group order {@code L}, little-endian. */
+    private static final byte[] ORDER = Utils.hexToBytes(
+            "edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010");
+
     /**
-     * @param a the public key point {@code A} (P3, as decoded)
+     * Whether {@link #holds} gives the outcome of {@code GroupElement.doubleScalarMultiplyVariableTime} for {@code a}:
+     * a P3 point of the standard curve with {@link Ed25519FieldElement} coordinates, {@code Z != 0},
+     * {@code T Z = X Y} and {@code (Y^2 - X^2) Z^2 = Z^4 + d X^2 Y^2}. Keys decoded from bytes always are. A point
+     * built with other coordinates through {@code GroupElement.p3} may not be, and {@code GroupElement.negate} and the
+     * table of {@code A, 3A, ..., 15A} treat such a point differently from this class's formulas.
+     *
+     * @param a a point
+     * @return whether {@link #holds} may be used for it
+     */
+    public static boolean supports(GroupElement a) {
+        if (a.getRepresentation() != GroupElement.Representation.P3
+                || !EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getCurve().equals(a.getCurve()))
+            return false;
+        FieldElement x = a.getX(), y = a.getY(), z = a.getZ(), t = a.getT();
+        if (!(x instanceof Ed25519FieldElement && y instanceof Ed25519FieldElement
+                && z instanceof Ed25519FieldElement && t instanceof Ed25519FieldElement))
+            return false;
+        if (!z.isNonZero())
+            return false;
+        if (!t.multiply(z).equals(x.multiply(y)))
+            return false;
+        FieldElement xx = x.square(), yy = y.square(), zz = z.square();
+        FieldElement d = EdDSANamedCurveTable.ED_25519_CURVE_SPEC.getCurve().getD();
+        return yy.subtract(xx).multiply(zz).equals(zz.square().add(d.multiply(xx).multiply(yy)));
+    }
+
+    /**
+     * @param a the public key point {@code A}, one that {@link #supports} accepts
      * @param k {@code SHA-512(R || A || M) mod L}, 32 bytes little-endian
-     * @param sig the signature {@code R || S}, {@code S < L}
-     * @return whether the first 32 bytes of {@code sig} encode {@code SB - kA}
+     * @param sig the signature {@code R || S}
+     * @return whether the first 32 bytes of {@code sig} encode {@code SB - kA}; false when {@code k} is not 32 bytes,
+     *         {@code sig} not 64 bytes, or {@code S >= L}
      */
     public static boolean holds(GroupElement a, byte[] k, byte[] sig) {
+        if (k.length != 32 || sig.length != 64 || !scalarBelowOrder(sig))
+            return false;
         byte[] s = new byte[32];
         System.arraycopy(sig, 32, s, 0, 32);
         byte[] aSlide = slide(k);
@@ -155,6 +192,17 @@ public final class Ed25519VerifyEquation {
         return true;
     }
 
+    /** {@code S < L} for the last 32 bytes of {@code sig}. */
+    private static boolean scalarBelowOrder(byte[] sig) {
+        for (int i = 31; i >= 0; i--) {
+            int s = sig[32 + i] & 0xff;
+            int l = ORDER[i] & 0xff;
+            if (s != l)
+                return s < l;
+        }
+        return false;
+    }
+
     /** libsodium {@code slide_vartime}; the same as {@code GroupElement.slide}. */
     static byte[] slide(byte[] a) {
         byte[] r = new byte[256];
@@ -203,7 +251,7 @@ public final class Ed25519VerifyEquation {
         final int[] t2d = new int[10];
     }
 
-    private static int[] t(net.i2p.crypto.eddsa.math.FieldElement e) {
+    private static int[] t(FieldElement e) {
         return ((Ed25519FieldElement) e).t;
     }
 

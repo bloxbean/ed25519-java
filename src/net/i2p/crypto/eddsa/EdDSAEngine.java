@@ -318,8 +318,9 @@ public final class EdDSAEngine extends Signature {
 
         // R = SB - H(Rbar,Abar,M)A
         GroupElement A = ((EdDSAPublicKey) key).getA();
-        if (EdDSANamedCurveTable.ED_25519_CURVE_SPEC.equals(key.getParams())
-                && A.getRepresentation() == GroupElement.Representation.P3) {
+        // Only the standard spec instance (whose base point carries the precomputed tables), and only a key point whose
+        // coordinates are consistent: anything else keeps the computation below, with its outcomes and exceptions.
+        if (key.getParams() == EdDSANamedCurveTable.ED_25519_CURVE_SPEC && Ed25519VerifyEquation.supports(A)) {
             // The same computation and comparison as below, on field elements updated in place.
             return Ed25519VerifyEquation.holds(A, h, sigBytes);
         }
